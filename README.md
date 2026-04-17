@@ -5,9 +5,9 @@ Conector bidireccional en tiempo real para sincronizar **productos, stock, preci
 ## Arquitectura
 
 ```text
-WooCommerce --(webhooks)--> Flask Middleware --(Celery/Redis)--> Workers --> Odoo XML-RPC
-     ^                                                                  |
-     |--------------------(eventos desde Odoo Automated Actions)--------|
+WooCommerce --(webhooks)--> Flask Middleware --(Celery/Redis)--> Workers --> Odoo (XML-RPC o JSON-RPC /json/2)
+     ^                                                                                       |
+     |------------------------------(eventos desde Odoo Automated Actions)-------------------|
 ```
 
 - **Middleware**: Flask + Celery
@@ -31,7 +31,7 @@ WooCommerce --(webhooks)--> Flask Middleware --(Celery/Redis)--> Workers --> Odo
 - Python 3.11+
 - Redis 7+
 - Instancia de WooCommerce con API REST habilitada
-- Instancia de Odoo con acceso XML-RPC
+- Instancia de Odoo con acceso XML-RPC (14-18) o JSON-RPC `/json/2` (19+)
 
 ## Instalación local
 
@@ -73,8 +73,43 @@ Ver `.env.example`.
 Campos clave:
 - `WC_URL`, `WC_CONSUMER_KEY`, `WC_CONSUMER_SECRET`
 - `ODOO_URL`, `ODOO_DB`, `ODOO_USER`, `ODOO_PASSWORD`
+- `ODOO_API_KEY`, `ODOO_PROTOCOL`, `ODOO_VERSION`
+- `PRICE_STRATEGY`, `ODOO_SALE_PRICELIST_ID`
 - `WEBHOOK_SECRET`
 - `CELERY_BROKER`
+
+## Compatibilidad de versiones de Odoo
+
+| Versión Odoo | Protocolo soportado | Recomendación |
+|---|---|---|
+| 14-18 | XML-RPC (`/xmlrpc/2`) | Usar `ODOO_PROTOCOL=xmlrpc` o `auto` sin API key |
+| 19+ | JSON-RPC (`/json/2`) + XML-RPC legacy | Preferir `ODOO_PROTOCOL=jsonrpc` o `auto` con `ODOO_API_KEY` |
+
+## Configuración para Odoo 19+
+
+1. Generar API key en Odoo (Preferencias de usuario).
+2. Configurar:
+   - `ODOO_PROTOCOL=auto` (o `jsonrpc`)
+   - `ODOO_API_KEY=<tu_api_key>`
+   - `ODOO_VERSION=19`
+
+## Precios oferta / descuento
+
+Mapeo principal:
+- WooCommerce `regular_price` ↔ Odoo `list_price`
+- WooCommerce `sale_price` ↔ Odoo `x_sale_price`
+- WooCommerce `date_on_sale_from` ↔ Odoo `x_sale_date_from`
+- WooCommerce `date_on_sale_to` ↔ Odoo `x_sale_date_to`
+
+Campos personalizados recomendados en `product.template`:
+- `x_sale_price` (Float)
+- `x_sale_date_from` (Datetime/Date)
+- `x_sale_date_to` (Datetime/Date)
+
+### Estrategia de precios
+
+- `PRICE_STRATEGY=custom_fields` (default): usa campos `x_sale_*`.
+- `PRICE_STRATEGY=pricelist`: usa `product.pricelist.item` y requiere `ODOO_SALE_PRICELIST_ID`.
 
 ## Configuración de webhooks en WooCommerce
 

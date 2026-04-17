@@ -1,15 +1,16 @@
-"""Cliente XML-RPC para Odoo."""
+"""Cliente para Odoo con soporte XML-RPC y JSON-RPC."""
 
 from __future__ import annotations
 
-import xmlrpc.client
 from typing import Any
 
 from connector.config import get_settings
+from connector.odoo_compat import normalize_field
+from connector.odoo_transport import OdooTransport, create_transport
 
 
 class OdooClient:
-    """Encapsula operaciones sobre modelos de Odoo vía XML-RPC."""
+    """Encapsula operaciones sobre modelos de Odoo."""
 
     def __init__(self) -> None:
         settings = get_settings()
@@ -17,27 +18,62 @@ class OdooClient:
         self.db = settings.odoo_db
         self.username = settings.odoo_user
         self.password = settings.odoo_password
-        self._uid: int | None = None
-        self.common = xmlrpc.client.ServerProxy(f"{self.url}/xmlrpc/2/common")
-        self.models = xmlrpc.client.ServerProxy(f"{self.url}/xmlrpc/2/object")
+        self.api_key = settings.odoo_api_key
+        self.protocol = settings.odoo_protocol
+        self.odoo_version = settings.odoo_version
+        self.sale_pricelist_id = settings.odoo_sale_pricelist_id
+        self.price_strategy = settings.price_strategy
+        self.transport: OdooTransport = create_transport(
+            url=self.url,
+            db=self.db,
+            user=self.username,
+            password=self.password,
+            api_key=self.api_key,
+            protocol=self.protocol,
+        )
 
     @property
     def uid(self) -> int:
-        """Autentica contra Odoo y cachea el uid."""
-        if self._uid is None:
-            uid = self.common.authenticate(self.db, self.username, self.password, {})
-            if not uid:
-                raise ConnectionError("No fue posible autenticarse en Odoo")
-            self._uid = uid
-        return self._uid
+        """Retorna el uid autenticado en el transporte configurado."""
+        return self.transport.uid
+
+    def _normalize_fields(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Normaliza nombres de campos para compatibilidad por versión."""
+        normalized = dict(kwargs)
+        fields = normalized.get("fields")
+        if isinstance(fields, list):
+            normalized["fields"] = [normalize_field(str(field), self.odoo_version) for field in fields]
+        return normalized
 
     def execute(self, model: str, method: str, args: list[Any], kwargs: dict[str, Any] | None = None) -> Any:
-        """Ejecuta un método XML-RPC sobre un modelo."""
-        return self.models.execute_kw(self.db, self.uid, self.password, model, method, args, kwargs or {})
+        """Ejecuta un método sobre un modelo de Odoo."""
+        return self.transport.execute_kw(model, method, args, self._normalize_fields(kwargs or {}))
 
     def get_product(self, product_id: int) -> dict[str, Any]:
         """Obtiene un producto por ID."""
-        result = self.execute("product.template", "read", [[product_id]], {"limit": 1})
+        result = self.execute(
+            "product.template",
+            "read",
+            [[product_id]],
+            {
+                "fields": [
+                    "id",
+                    "name",
+                    "default_code",
+                    "list_price",
+                    "description_sale",
+                    "qty_available",
+                    "categ_id",
+                    "x_wc_id",
+                    "product_variant_ids",
+                    "attribute_line_ids",
+                    "x_sale_price",
+                    "x_sale_date_from",
+                    "x_sale_date_to",
+                ],
+                "limit": 1,
+            },
+        )
         return result[0] if result else {}
 
     def create_product(self, payload: dict[str, Any]) -> int:
@@ -196,3 +232,48 @@ class OdooClient:
             [[("product_tmpl_id", "=", template_id)]],
             {"fields": ["id", "attribute_id", "value_ids"]},
         )
+
+    def get_sale_price(self, product_id: int) -> dict[str, Any] | None:
+        """Busca precio de oferta activo en product.pricelist.item."""
+        if self.sale_pricelist_id <= 0:
+            return None
+        items = self.execute(
+            "product.pricelist.item",
+            "search_read",
+            [
+                [
+                    ("pricelist_id", "=", self.sale_pricelist_id),
+                    ("applied_on", "=", "1_product"),
+                    ("product_tmpl_id", "=", product_id),
+                ]
+            ],
+            {"fields": ["id", "fixed_price", "date_start", "date_end"], "limit": 1},
+        )
+        return items[0] if items else None
+
+    def set_sale_price(self, product_id: int, price: float, date_from: str | None = None, date_to: str | None = None) -> None:
+        """Crea o actualiza el precio de oferta en pricelist item."""
+        if self.sale_pricelist_id <= 0:
+            raise ValueError("ODOO_SALE_PRICELIST_ID debe configurarse para estrategia pricelist")
+        existing = self.get_sale_price(product_id)
+        payload = {
+            "pricelist_id": self.sale_pricelist_id,
+            "applied_on": "1_product",
+            "product_tmpl_id": product_id,
+            "compute_price": "fixed",
+            "fixed_price": price,
+            "date_start": date_from or False,
+            "date_end": date_to or False,
+        }
+        if existing:
+            self.execute("product.pricelist.item", "write", [[existing["id"]], payload])
+            return
+        self.execute("product.pricelist.item", "create", [payload])
+
+    def clear_sale_price(self, product_id: int) -> None:
+        """Elimina el precio de oferta de la lista configurada."""
+        if self.sale_pricelist_id <= 0:
+            return
+        existing = self.get_sale_price(product_id)
+        if existing:
+            self.execute("product.pricelist.item", "unlink", [[existing["id"]]])

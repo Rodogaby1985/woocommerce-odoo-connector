@@ -25,6 +25,44 @@ def _odoo_client() -> OdooClient:
     return OdooClient()
 
 
+def _sync_sale_price_wc_to_odoo(client: OdooClient, product_id: int, payload: dict[str, Any]) -> None:
+    """Sincroniza precio oferta desde WooCommerce hacia Odoo según estrategia."""
+    if client.price_strategy != "pricelist":
+        return
+    sale_price = payload.get("sale_price")
+    if sale_price in (None, ""):
+        client.clear_sale_price(product_id)
+        return
+    try:
+        price = float(sale_price)
+    except (TypeError, ValueError):
+        client.clear_sale_price(product_id)
+        return
+    client.set_sale_price(
+        product_id=product_id,
+        price=price,
+        date_from=payload.get("date_on_sale_from"),
+        date_to=payload.get("date_on_sale_to"),
+    )
+
+
+def _enrich_sale_price_odoo_to_wc(client: OdooClient, product: dict[str, Any]) -> dict[str, Any]:
+    """Completa campos de oferta desde pricelist cuando corresponde."""
+    if client.price_strategy != "pricelist":
+        return product
+    item = client.get_sale_price(product.get("id"))
+    enriched = dict(product)
+    if item:
+        enriched["x_sale_price"] = item.get("fixed_price")
+        enriched["x_sale_date_from"] = item.get("date_start")
+        enriched["x_sale_date_to"] = item.get("date_end")
+    else:
+        enriched["x_sale_price"] = 0.0
+        enriched["x_sale_date_from"] = False
+        enriched["x_sale_date_to"] = False
+    return enriched
+
+
 def _build_attribute_line_ids(
     odoo: OdooClient,
     attributes: list[dict[str, Any]],
@@ -63,8 +101,10 @@ def sync_product_from_wc(self, payload: dict) -> dict:
         existing = client.find_product_by_sku(payload["sku"])
         if existing:
             client.update_product(existing["id"], mapped)
+            _sync_sale_price_wc_to_odoo(client, existing["id"], payload)
             return {"status": "updated", "odoo_id": existing["id"]}
         product_id = client.create_product(mapped)
+        _sync_sale_price_wc_to_odoo(client, product_id, payload)
         return {"status": "created", "odoo_id": product_id}
     except Exception as exc:
         raise self.retry(exc=exc)
@@ -177,6 +217,7 @@ def sync_product_to_wc(self, payload: dict) -> dict:
 
         odoo = _odoo_client()
         product = odoo.get_product(payload["id"])
+        product = _enrich_sale_price_odoo_to_wc(odoo, product)
         if _is_variable_product(product):
             variable_payload = dict(payload)
             variable_payload["x_wc_id"] = payload.get("x_wc_id") or product.get("x_wc_id")

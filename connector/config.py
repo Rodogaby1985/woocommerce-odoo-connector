@@ -23,6 +23,10 @@ class Settings:
     odoo_user: str
     odoo_password: str
     webhook_secret: str
+    odoo_api_key: str = ""
+    odoo_protocol: str = "auto"
+    odoo_sale_pricelist_id: int = 0
+    price_strategy: str = "custom_fields"
     celery_broker: str = "redis://localhost:6379/0"
 
     @classmethod
@@ -36,6 +40,10 @@ class Settings:
             "odoo_db": os.getenv("ODOO_DB", ""),
             "odoo_user": os.getenv("ODOO_USER", ""),
             "odoo_password": os.getenv("ODOO_PASSWORD", ""),
+            "odoo_api_key": os.getenv("ODOO_API_KEY", ""),
+            "odoo_protocol": os.getenv("ODOO_PROTOCOL", "auto"),
+            "odoo_sale_pricelist_id": int(os.getenv("ODOO_SALE_PRICELIST_ID", "0") or 0),
+            "price_strategy": os.getenv("PRICE_STRATEGY", "custom_fields"),
             "webhook_secret": os.getenv("WEBHOOK_SECRET", ""),
             "celery_broker": os.getenv("CELERY_BROKER", "redis://localhost:6379/0"),
         }

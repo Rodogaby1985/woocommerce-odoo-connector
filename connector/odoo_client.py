@@ -1,43 +1,58 @@
-"""Cliente XML-RPC para Odoo."""
+"""Cliente para operaciones sobre Odoo con transporte compatible 18/19."""
 
 from __future__ import annotations
 
-import xmlrpc.client
 from typing import Any
 
 from connector.config import get_settings
+from connector.odoo_compat import normalize_field
+from connector.odoo_transport import create_transport
 
 
 class OdooClient:
-    """Encapsula operaciones sobre modelos de Odoo vía XML-RPC."""
+    """Encapsula operaciones sobre modelos de Odoo."""
 
     def __init__(self) -> None:
-        settings = get_settings()
-        self.url = settings.odoo_url
-        self.db = settings.odoo_db
-        self.username = settings.odoo_user
-        self.password = settings.odoo_password
-        self._uid: int | None = None
-        self.common = xmlrpc.client.ServerProxy(f"{self.url}/xmlrpc/2/common")
-        self.models = xmlrpc.client.ServerProxy(f"{self.url}/xmlrpc/2/object")
+        self.settings = get_settings()
+        self.transport = create_transport(
+            url=self.settings.odoo_url,
+            db=self.settings.odoo_db,
+            user=self.settings.odoo_user,
+            password=self.settings.odoo_password,
+            api_key=self.settings.odoo_api_key or None,
+            protocol=self.settings.odoo_protocol,
+        )
+        self.odoo_version = 19 if (self.settings.odoo_protocol or "").lower() == "jsonrpc" else 18
 
-    @property
-    def uid(self) -> int:
-        """Autentica contra Odoo y cachea el uid."""
-        if self._uid is None:
-            uid = self.common.authenticate(self.db, self.username, self.password, {})
-            if not uid:
-                raise ConnectionError("No fue posible autenticarse en Odoo")
-            self._uid = uid
-        return self._uid
+    def _prepare_kwargs(self, kwargs: dict[str, Any] | None = None) -> dict[str, Any]:
+        params = dict(kwargs or {})
+        fields = params.get("fields")
+        if isinstance(fields, list):
+            params["fields"] = [normalize_field(str(field), self.odoo_version) for field in fields]
+        return params
 
     def execute(self, model: str, method: str, args: list[Any], kwargs: dict[str, Any] | None = None) -> Any:
-        """Ejecuta un método XML-RPC sobre un modelo."""
-        return self.models.execute_kw(self.db, self.uid, self.password, model, method, args, kwargs or {})
+        """Ejecuta un método RPC sobre un modelo."""
+        return self.transport.execute_kw(model, method, args, self._prepare_kwargs(kwargs))
 
     def get_product(self, product_id: int) -> dict[str, Any]:
         """Obtiene un producto por ID."""
-        result = self.execute("product.template", "read", [[product_id]], {"limit": 1})
+        fields = [
+            "id",
+            "name",
+            "default_code",
+            "list_price",
+            "x_sale_price",
+            "x_sale_date_from",
+            "x_sale_date_to",
+            "description_sale",
+            "qty_available",
+            "categ_id",
+            "x_wc_id",
+            "product_variant_ids",
+            "attribute_line_ids",
+        ]
+        result = self.execute("product.template", "read", [[product_id]], {"fields": fields, "limit": 1})
         return result[0] if result else {}
 
     def create_product(self, payload: dict[str, Any]) -> int:
@@ -52,6 +67,63 @@ class OdooClient:
         """Busca un producto por SKU (default_code)."""
         result = self.execute("product.template", "search_read", [[("default_code", "=", sku)]], {"limit": 1})
         return result[0] if result else None
+
+    def _get_sale_pricelist_id(self) -> int:
+        return int(self.settings.odoo_sale_pricelist_id or 0)
+
+    def get_sale_price(self, product_id: int) -> dict[str, Any] | None:
+        """Obtiene el precio oferta activo desde una lista de precios."""
+        pricelist_id = self._get_sale_pricelist_id()
+        if not pricelist_id:
+            return None
+        items = self.execute(
+            "product.pricelist.item",
+            "search_read",
+            [[("pricelist_id", "=", pricelist_id), ("product_tmpl_id", "=", product_id)]],
+            {"fields": ["id", "fixed_price", "date_start", "date_end"], "limit": 1},
+        )
+        if not items:
+            return None
+        item = items[0]
+        return {
+            "item_id": int(item["id"]),
+            "price": float(item.get("fixed_price") or 0.0),
+            "date_from": item.get("date_start") or "",
+            "date_to": item.get("date_end") or "",
+        }
+
+    def set_sale_price(
+        self,
+        product_id: int,
+        price: float,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> bool:
+        """Crea o actualiza un item de lista de precios para oferta."""
+        pricelist_id = self._get_sale_pricelist_id()
+        if not pricelist_id:
+            return False
+        payload = {
+            "pricelist_id": pricelist_id,
+            "applied_on": "1_product",
+            "product_tmpl_id": product_id,
+            "compute_price": "fixed",
+            "fixed_price": float(price),
+            "date_start": date_from or False,
+            "date_end": date_to or False,
+        }
+        existing = self.get_sale_price(product_id)
+        if existing:
+            return bool(self.execute("product.pricelist.item", "write", [[existing["item_id"]], payload]))
+        self.execute("product.pricelist.item", "create", [payload])
+        return True
+
+    def clear_sale_price(self, product_id: int) -> bool:
+        """Elimina precio oferta en lista de precios."""
+        existing = self.get_sale_price(product_id)
+        if not existing:
+            return True
+        return bool(self.execute("product.pricelist.item", "unlink", [[existing["item_id"]]]))
 
     def read_stock_quant(self, product_id: int, location_id: int = 1) -> dict[str, Any] | None:
         """Lee el stock en stock.quant para un producto/location."""
@@ -148,7 +220,19 @@ class OdooClient:
             "product.product",
             "search_read",
             [[("product_tmpl_id", "=", template_id)]],
-            {"fields": ["id", "default_code", "lst_price", "qty_available", "x_wc_variation_id", "product_template_attribute_value_ids"]},
+            {
+                "fields": [
+                    "id",
+                    "default_code",
+                    "lst_price",
+                    "x_sale_price",
+                    "x_sale_date_from",
+                    "x_sale_date_to",
+                    "qty_available",
+                    "x_wc_variation_id",
+                    "product_template_attribute_value_ids",
+                ]
+            },
         )
         for variant in variants:
             ptav_ids = variant.get("product_template_attribute_value_ids") or []

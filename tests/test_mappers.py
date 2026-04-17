@@ -19,6 +19,7 @@ def test_product_mapper_wc_to_odoo() -> None:
     assert mapped["name"] == "Producto A"
     assert mapped["default_code"] == "SKU-A"
     assert mapped["list_price"] == 19.99
+    assert mapped["x_sale_price"] == 0.0
     assert mapped["qty_available"] == 5.0
     assert mapped["categ_id"] == 3
 
@@ -63,6 +64,7 @@ def test_variant_mapper_wc_variation_to_odoo() -> None:
 
     assert mapped["x_wc_variation_id"] == 101
     assert mapped["lst_price"] == 2500.0
+    assert mapped["x_sale_price"] == 0.0
     assert mapped["qty_available"] == 15.0
     assert mapped["variant_attributes"][0]["name"] == "Talle"
 
@@ -85,3 +87,60 @@ def test_product_mapper_odoo_to_wc_variable() -> None:
 
     assert mapped["type"] == "variable"
     assert mapped["attributes"][0]["name"] == "Talle"
+
+
+def test_product_mapper_sale_price_bidirectional() -> None:
+    wc_product = {
+        "id": 12,
+        "name": "Producto B",
+        "sku": "SKU-B",
+        "regular_price": "30",
+        "sale_price": "21.5",
+        "date_on_sale_from": "2026-04-01T00:00:00",
+        "date_on_sale_to": "2026-04-30T00:00:00",
+    }
+    mapped_odoo = ProductMapper.wc_to_odoo(wc_product)
+    assert mapped_odoo["x_sale_price"] == 21.5
+    assert mapped_odoo["x_sale_date_from"] == "2026-04-01T00:00:00"
+    assert mapped_odoo["x_sale_date_to"] == "2026-04-30T00:00:00"
+
+    odoo_product = {
+        "name": "Producto B",
+        "default_code": "SKU-B",
+        "list_price": 30,
+        "x_sale_price": 21.5,
+        "x_sale_date_from": "2026-04-01T00:00:00",
+        "x_sale_date_to": "2026-04-30T00:00:00",
+        "qty_available": 2,
+    }
+    mapped_wc = ProductMapper.odoo_to_wc(odoo_product)
+    assert mapped_wc["sale_price"] == "21.5"
+    assert mapped_wc["date_on_sale_from"] == "2026-04-01T00:00:00"
+    assert mapped_wc["date_on_sale_to"] == "2026-04-30T00:00:00"
+
+
+def test_variant_mapper_sale_price_bidirectional() -> None:
+    wc_variation = {
+        "id": 201,
+        "regular_price": "50",
+        "sale_price": "40",
+        "date_on_sale_from": "2026-05-01T00:00:00",
+        "date_on_sale_to": "2026-05-10T00:00:00",
+    }
+    mapped_variant = VariantMapper.wc_variation_to_odoo(wc_variation)
+    assert mapped_variant["x_sale_price"] == 40.0
+    assert mapped_variant["x_sale_date_from"] == "2026-05-01T00:00:00"
+    assert mapped_variant["x_sale_date_to"] == "2026-05-10T00:00:00"
+
+    odoo_variant = {
+        "default_code": "V-1",
+        "lst_price": 50,
+        "x_sale_price": 40,
+        "x_sale_date_from": "2026-05-01T00:00:00",
+        "x_sale_date_to": "2026-05-10T00:00:00",
+        "qty_available": 1,
+    }
+    mapped_wc = VariantMapper.odoo_variant_to_wc_variation(odoo_variant)
+    assert mapped_wc["sale_price"] == "40.0"
+    assert mapped_wc["date_on_sale_from"] == "2026-05-01T00:00:00"
+    assert mapped_wc["date_on_sale_to"] == "2026-05-10T00:00:00"

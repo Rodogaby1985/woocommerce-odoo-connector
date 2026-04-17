@@ -9,6 +9,14 @@ MIDDLEWARE_URL = "http://middleware:8000/webhook/odoo"
 
 def notify_product_change(record: object) -> None:
     """Envía evento product.write al middleware."""
+    attribute_lines = []
+    for line in getattr(record, "attribute_line_ids", []):
+        attribute_lines.append(
+            {
+                "attribute_name": getattr(getattr(line, "attribute_id", None), "name", ""),
+                "values": [getattr(value, "name", "") for value in getattr(line, "value_ids", [])],
+            }
+        )
     payload = {
         "event": "product.write",
         "data": {
@@ -18,6 +26,8 @@ def notify_product_change(record: object) -> None:
             "list_price": getattr(record, "list_price", 0),
             "qty_available": getattr(record, "qty_available", 0),
             "x_wc_id": getattr(record, "x_wc_id", None),
+            "product_variant_ids": [variant.id for variant in getattr(record, "product_variant_ids", [])],
+            "template_attribute_lines": attribute_lines,
         },
     }
     requests.post(MIDDLEWARE_URL, json=payload, timeout=10)

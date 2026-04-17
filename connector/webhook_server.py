@@ -15,6 +15,7 @@ from connector.tasks import celery_app
 WC_TOPIC_TASK_MAP = {
     "product.created": "connector.tasks.sync_product_from_wc",
     "product.updated": "connector.tasks.sync_product_from_wc",
+    "product.restored": "connector.tasks.sync_product_from_wc",
     "order.created": "connector.tasks.sync_order_from_wc",
     "order.updated": "connector.tasks.sync_order_from_wc",
     "customer.created": "connector.tasks.sync_customer_from_wc",
@@ -24,6 +25,7 @@ WC_TOPIC_TASK_MAP = {
 ODOO_EVENT_TASK_MAP = {
     "product.write": "connector.tasks.sync_product_to_wc",
     "product.create": "connector.tasks.sync_product_to_wc",
+    "variant.write": "connector.tasks.sync_variant_stock_to_wc",
     "stock.change": "connector.tasks.sync_stock_to_wc",
 }
 

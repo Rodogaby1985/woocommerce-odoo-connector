@@ -33,3 +33,22 @@ def test_find_product_by_sku(api_cls: MagicMock, get_settings: MagicMock) -> Non
 
     assert product == {"id": 1, "sku": "ABC"}
     api.get.assert_called_once()
+
+
+@patch("connector.wc_client.get_settings")
+@patch("connector.wc_client.API")
+def test_get_variations(api_cls: MagicMock, get_settings: MagicMock) -> None:
+    get_settings.return_value = MagicMock(
+        wc_url="https://shop.test",
+        wc_consumer_key="ck",
+        wc_consumer_secret="cs",
+    )
+    api = MagicMock()
+    api.get.return_value = _Resp([{"id": 101}])
+    api_cls.return_value = api
+
+    client = WooCommerceClient()
+    variations = client.get_variations(100)
+
+    assert variations == [{"id": 101}]
+    api.get.assert_called_once_with("products/100/variations")

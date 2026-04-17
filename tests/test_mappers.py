@@ -19,6 +19,9 @@ def test_product_mapper_wc_to_odoo() -> None:
     assert mapped["name"] == "Producto A"
     assert mapped["default_code"] == "SKU-A"
     assert mapped["list_price"] == 19.99
+    assert mapped["x_sale_price"] == 0.0
+    assert mapped["x_sale_date_from"] is False
+    assert mapped["x_sale_date_to"] is False
     assert mapped["qty_available"] == 5.0
     assert mapped["categ_id"] == 3
 
@@ -85,3 +88,39 @@ def test_product_mapper_odoo_to_wc_variable() -> None:
 
     assert mapped["type"] == "variable"
     assert mapped["attributes"][0]["name"] == "Talle"
+
+
+def test_product_mapper_wc_to_odoo_sale_price_dates() -> None:
+    wc_product = {
+        "id": 11,
+        "name": "Producto Oferta",
+        "sku": "SKU-OFERTA",
+        "regular_price": "25.00",
+        "sale_price": "19.90",
+        "date_on_sale_from": "2026-01-01T00:00:00",
+        "date_on_sale_to": "2026-01-10T23:59:59",
+    }
+
+    mapped = ProductMapper.wc_to_odoo(wc_product)
+
+    assert mapped["x_sale_price"] == 19.9
+    assert mapped["x_sale_date_from"] == "2026-01-01T00:00:00"
+    assert mapped["x_sale_date_to"] == "2026-01-10T23:59:59"
+
+
+def test_product_mapper_odoo_to_wc_sale_price_dates() -> None:
+    odoo_product = {
+        "name": "Producto Oferta",
+        "default_code": "SKU-OFERTA",
+        "list_price": 25,
+        "x_sale_price": 19.9,
+        "x_sale_date_from": "2026-01-01 00:00:00",
+        "x_sale_date_to": "2026-01-10 23:59:59",
+        "qty_available": 4,
+    }
+
+    mapped = ProductMapper.odoo_to_wc(odoo_product)
+
+    assert mapped["sale_price"] == "19.9"
+    assert mapped["date_on_sale_from"] == "2026-01-01 00:00:00"
+    assert mapped["date_on_sale_to"] == "2026-01-10 23:59:59"

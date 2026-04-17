@@ -25,6 +25,47 @@ def _odoo_client() -> OdooClient:
     return OdooClient()
 
 
+def _to_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _uses_pricelist_strategy() -> bool:
+    return (settings.price_strategy or "custom_fields").lower() == "pricelist"
+
+
+def _sync_sale_price_from_wc(odoo: OdooClient, product_id: int, source: dict[str, Any]) -> None:
+    if not _uses_pricelist_strategy():
+        return
+    sale_price = source.get("sale_price")
+    if sale_price in (None, ""):
+        odoo.clear_sale_price(product_id)
+        return
+    odoo.set_sale_price(
+        product_id=product_id,
+        price=_to_float(sale_price),
+        date_from=source.get("date_on_sale_from") or None,
+        date_to=source.get("date_on_sale_to") or None,
+    )
+
+
+def _inject_sale_price_to_wc(odoo: OdooClient, product_id: int, target: dict[str, Any]) -> dict[str, Any]:
+    if not _uses_pricelist_strategy():
+        return target
+    sale = odoo.get_sale_price(product_id)
+    if not sale:
+        target["sale_price"] = ""
+        target["date_on_sale_from"] = ""
+        target["date_on_sale_to"] = ""
+        return target
+    target["sale_price"] = str(sale["price"])
+    target["date_on_sale_from"] = sale["date_from"] or ""
+    target["date_on_sale_to"] = sale["date_to"] or ""
+    return target
+
+
 def _build_attribute_line_ids(
     odoo: OdooClient,
     attributes: list[dict[str, Any]],
@@ -63,8 +104,10 @@ def sync_product_from_wc(self, payload: dict) -> dict:
         existing = client.find_product_by_sku(payload["sku"])
         if existing:
             client.update_product(existing["id"], mapped)
+            _sync_sale_price_from_wc(client, int(existing["id"]), payload)
             return {"status": "updated", "odoo_id": existing["id"]}
         product_id = client.create_product(mapped)
+        _sync_sale_price_from_wc(client, product_id, payload)
         return {"status": "created", "odoo_id": product_id}
     except Exception as exc:
         raise self.retry(exc=exc)
@@ -91,6 +134,7 @@ def sync_variable_product_from_wc(self, payload: dict) -> dict:
             odoo.update_product(template_id, mapped_template)
         else:
             template_id = odoo.create_product(mapped_template)
+        _sync_sale_price_from_wc(odoo, template_id, payload)
 
         variations = wc.get_variations(payload["id"])
         synced_variants = 0
@@ -184,6 +228,7 @@ def sync_product_to_wc(self, payload: dict) -> dict:
 
         wc = _wc_client()
         mapped = ProductMapper.odoo_to_wc(product)
+        mapped = _inject_sale_price_to_wc(odoo, int(payload["id"]), mapped)
         wc_id = payload.get("x_wc_id") or product.get("x_wc_id")
         if wc_id:
             wc.update_product(int(wc_id), mapped)
@@ -212,6 +257,7 @@ def sync_variable_product_to_wc(self, payload: dict) -> dict:
 
         mapped_template = ProductMapper.odoo_to_wc(template)
         mapped_template["type"] = "variable"
+        mapped_template = _inject_sale_price_to_wc(odoo, int(payload["id"]), mapped_template)
         wc_id = payload.get("x_wc_id") or template.get("x_wc_id")
         if wc_id:
             wc_template = wc.update_product(int(wc_id), mapped_template)

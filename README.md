@@ -5,7 +5,7 @@ Conector bidireccional en tiempo real para sincronizar **productos, stock, preci
 ## Arquitectura
 
 ```text
-WooCommerce --(webhooks)--> Flask Middleware --(Celery/Redis)--> Workers --> Odoo XML-RPC
+WooCommerce --(webhooks)--> Flask Middleware --(Celery/Redis)--> Workers --> Odoo (XML-RPC / JSON-RPC)
      ^                                                                  |
      |--------------------(eventos desde Odoo Automated Actions)--------|
 ```
@@ -31,7 +31,7 @@ WooCommerce --(webhooks)--> Flask Middleware --(Celery/Redis)--> Workers --> Odo
 - Python 3.11+
 - Redis 7+
 - Instancia de WooCommerce con API REST habilitada
-- Instancia de Odoo con acceso XML-RPC
+- Instancia de Odoo con acceso XML-RPC (14-18) o JSON-RPC (19+)
 
 ## Instalación local
 
@@ -73,8 +73,43 @@ Ver `.env.example`.
 Campos clave:
 - `WC_URL`, `WC_CONSUMER_KEY`, `WC_CONSUMER_SECRET`
 - `ODOO_URL`, `ODOO_DB`, `ODOO_USER`, `ODOO_PASSWORD`
+- `ODOO_API_KEY`, `ODOO_PROTOCOL` (`auto`, `xmlrpc`, `jsonrpc`)
+- `PRICE_STRATEGY` (`custom_fields`, `pricelist`), `ODOO_SALE_PRICELIST_ID`
 - `WEBHOOK_SECRET`
 - `CELERY_BROKER`
+
+## Compatibilidad de versiones Odoo
+
+| Versión Odoo | Protocolo recomendado | Autenticación |
+|---|---|---|
+| 14-18 | XML-RPC | Usuario + contraseña |
+| 19+ | JSON-RPC | API Key (o contraseña) |
+
+## Configuración para Odoo 19
+
+En `.env`:
+- `ODOO_PROTOCOL=jsonrpc` (o `auto`)
+- `ODOO_API_KEY=...`
+
+Si `ODOO_PROTOCOL=auto`, el conector usa JSON-RPC cuando hay API Key y XML-RPC en caso contrario.
+
+## Precios oferta / descuento
+
+Mapeo soportado:
+- WooCommerce `regular_price` ↔ Odoo `list_price`
+- WooCommerce `sale_price` ↔ Odoo `x_sale_price`
+- WooCommerce `date_on_sale_from` ↔ Odoo `x_sale_date_from`
+- WooCommerce `date_on_sale_to` ↔ Odoo `x_sale_date_to`
+
+Campos personalizados recomendados en `product.template`:
+- `x_sale_price`
+- `x_sale_date_from`
+- `x_sale_date_to`
+
+### Estrategia de precios
+
+- `PRICE_STRATEGY=custom_fields`: usa campos `x_sale_*`
+- `PRICE_STRATEGY=pricelist`: usa `product.pricelist.item` en `ODOO_SALE_PRICELIST_ID`
 
 ## Configuración de webhooks en WooCommerce
 

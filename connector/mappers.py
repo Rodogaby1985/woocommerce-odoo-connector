@@ -12,6 +12,11 @@ def _to_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _normalize_options(values: list[Any] | None) -> list[str]:
+    """Normaliza listas de opciones de atributos eliminando vacíos."""
+    return [str(value) for value in (values or []) if value not in (None, "")]
+
+
 class ProductMapper:
     """Mapea productos entre WooCommerce y Odoo."""
 
@@ -70,7 +75,7 @@ class VariantMapper:
             name = attribute.get("name")
             if not name:
                 continue
-            options = [str(option) for option in (attribute.get("options") or []) if option not in (None, "")]
+            options = _normalize_options(attribute.get("options"))
             mapped.append(
                 {
                     "attribute_name": name,
@@ -132,7 +137,7 @@ class VariantMapper:
                     name = attribute_id
             if not name:
                 continue
-            options = [str(value) for value in (line.get("values") or []) if value not in (None, "")]
+            options = _normalize_options(line.get("values"))
             attributes.append({"name": name, "visible": True, "variation": True, "options": options})
         return attributes
 

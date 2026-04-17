@@ -78,3 +78,31 @@ class WooCommerceClient:
     def create_category(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Crea una categoría de producto."""
         return self._parse_response(self.client.post("products/categories", data=payload))
+
+    def get_variations(self, product_id: int) -> list[dict[str, Any]]:
+        """Obtiene variaciones de un producto variable."""
+        return self._parse_response(self.client.get(f"products/{product_id}/variations"))
+
+    def create_variation(self, product_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        """Crea una variación para un producto variable."""
+        return self._parse_response(self.client.post(f"products/{product_id}/variations", data=payload))
+
+    def update_variation(self, product_id: int, variation_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        """Actualiza una variación existente."""
+        return self._parse_response(self.client.put(f"products/{product_id}/variations/{variation_id}", data=payload))
+
+    def get_product_attributes(self) -> list[dict[str, Any]]:
+        """Obtiene atributos globales de productos en WooCommerce."""
+        return self._parse_response(self.client.get("products/attributes"))
+
+    def create_product_attribute(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Crea un atributo global de producto."""
+        return self._parse_response(self.client.post("products/attributes", data=payload))
+
+    def get_attribute_terms(self, attribute_id: int) -> list[dict[str, Any]]:
+        """Obtiene términos (valores) de un atributo."""
+        return self._parse_response(self.client.get(f"products/attributes/{attribute_id}/terms"))
+
+    def create_attribute_term(self, attribute_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        """Crea un término para un atributo."""
+        return self._parse_response(self.client.post(f"products/attributes/{attribute_id}/terms", data=payload))

@@ -122,3 +122,77 @@ class OdooClient:
     def delete_category(self, category_id: int) -> bool:
         """Elimina categoría."""
         return bool(self.execute("product.category", "unlink", [[category_id]]))
+
+    def get_or_create_attribute(self, name: str) -> int:
+        """Busca o crea un atributo de producto por nombre."""
+        result = self.execute("product.attribute", "search_read", [[("name", "=", name)]], {"limit": 1})
+        if result:
+            return int(result[0]["id"])
+        return int(self.execute("product.attribute", "create", [{"name": name}]))
+
+    def get_or_create_attribute_value(self, attribute_id: int, name: str) -> int:
+        """Busca o crea un valor de atributo."""
+        result = self.execute(
+            "product.attribute.value",
+            "search_read",
+            [[("attribute_id", "=", attribute_id), ("name", "=", name)]],
+            {"limit": 1},
+        )
+        if result:
+            return int(result[0]["id"])
+        return int(self.execute("product.attribute.value", "create", [{"attribute_id": attribute_id, "name": name}]))
+
+    def get_product_variants(self, template_id: int) -> list[dict[str, Any]]:
+        """Obtiene variantes de un producto plantilla."""
+        variants = self.execute(
+            "product.product",
+            "search_read",
+            [[("product_tmpl_id", "=", template_id)]],
+            {"fields": ["id", "default_code", "lst_price", "qty_available", "x_wc_variation_id", "product_template_attribute_value_ids"]},
+        )
+        for variant in variants:
+            ptav_ids = variant.get("product_template_attribute_value_ids") or []
+            variant["variant_attributes"] = []
+            if not ptav_ids:
+                continue
+            ptav_values = self.execute(
+                "product.template.attribute.value",
+                "read",
+                [ptav_ids],
+                {"fields": ["attribute_id", "product_attribute_value_id"]},
+            )
+            for ptav in ptav_values:
+                attribute_id = ptav.get("attribute_id")
+                product_attribute_value_id = ptav.get("product_attribute_value_id")
+                attribute_name = attribute_id[1] if isinstance(attribute_id, (list, tuple)) and len(attribute_id) > 1 else ""
+                value_name = (
+                    product_attribute_value_id[1]
+                    if isinstance(product_attribute_value_id, (list, tuple)) and len(product_attribute_value_id) > 1
+                    else ""
+                )
+                if attribute_name and value_name:
+                    variant["variant_attributes"].append({"name": attribute_name, "value": value_name})
+        return variants
+
+    def get_variant_by_wc_id(self, wc_variation_id: int) -> dict[str, Any] | None:
+        """Busca una variante por campo técnico x_wc_variation_id."""
+        result = self.execute(
+            "product.product",
+            "search_read",
+            [[("x_wc_variation_id", "=", wc_variation_id)]],
+            {"limit": 1},
+        )
+        return result[0] if result else None
+
+    def update_variant(self, variant_id: int, payload: dict[str, Any]) -> bool:
+        """Actualiza una variante product.product."""
+        return bool(self.execute("product.product", "write", [[variant_id], payload]))
+
+    def get_template_attribute_lines(self, template_id: int) -> list[dict[str, Any]]:
+        """Obtiene líneas de atributos de una plantilla."""
+        return self.execute(
+            "product.template.attribute.line",
+            "search_read",
+            [[("product_tmpl_id", "=", template_id)]],
+            {"fields": ["id", "attribute_id", "value_ids"]},
+        )

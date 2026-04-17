@@ -82,7 +82,7 @@ Configurar webhooks apuntando a:
 - `https://TU_MIDDLEWARE/webhook/woocommerce`
 
 Topics soportados:
-- `product.created`, `product.updated`
+- `product.created`, `product.updated`, `product.restored`
 - `order.created`, `order.updated`
 - `customer.created`, `customer.updated`
 
@@ -99,11 +99,36 @@ Endpoint destino:
 
 Eventos soportados:
 - `product.write`
+- `variant.write`
 - `stock.change`
 
 ## Campo personalizado `x_wc_id` en Odoo
 
 Se recomienda crear el campo técnico `x_wc_id` en `product.template` y `res.partner` para rastrear el ID remoto de WooCommerce y evitar duplicados.
+
+## Soporte de productos variables (variantes)
+
+El conector soporta sincronización bidireccional de productos variables:
+
+- WooCommerce `attributes[]` → `product.attribute` + `product.attribute.value`
+- WooCommerce producto padre `type=variable` ↔ `product.template`
+- WooCommerce `/products/{id}/variations` ↔ `product.product`
+
+Campos técnicos recomendados en Odoo:
+- `x_wc_id` en `product.template`
+- `x_wc_variation_id` en `product.product`
+
+### Flujo WooCommerce → Odoo
+
+1. Se recibe `product.created` / `product.updated` para producto variable.
+2. Se sincroniza plantilla y líneas de atributos.
+3. Se consultan variaciones y se crean/actualizan variantes individuales con SKU, precio y stock.
+
+### Flujo Odoo → WooCommerce
+
+1. Cambios en `product.template` con variantes se sincronizan como `type=variable`.
+2. Se sincronizan atributos del template.
+3. Cada `product.product` crea/actualiza su variación remota con stock y precio individual.
 
 ## Prevención de bucles
 

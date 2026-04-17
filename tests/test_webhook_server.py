@@ -62,3 +62,20 @@ def test_health_endpoint() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json == {"status": "ok"}
+
+
+def test_odoo_webhook_variant_event() -> None:
+    fake_celery = MagicMock()
+    app = create_flask_app(fake_celery)
+    client = app.test_client()
+
+    response = client.post(
+        "/webhook/odoo",
+        json={"event": "variant.write", "data": {"variant_id": 20}},
+    )
+
+    assert response.status_code == 202
+    fake_celery.send_task.assert_called_once_with(
+        "connector.tasks.sync_variant_stock_to_wc",
+        kwargs={"payload": {"variant_id": 20}},
+    )

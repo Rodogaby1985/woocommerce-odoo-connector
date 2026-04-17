@@ -20,7 +20,7 @@ class ProductMapper:
         """Convierte un producto de WooCommerce a formato Odoo."""
         categories = product.get("categories", [])
         category_id = categories[0].get("id") if categories else False
-        return {
+        mapped = {
             "name": product.get("name"),
             "default_code": product.get("sku"),
             "list_price": _to_float(product.get("regular_price") or product.get("price")),
@@ -29,6 +29,9 @@ class ProductMapper:
             "categ_id": category_id,
             "x_wc_id": product.get("id"),
         }
+        if product.get("type") == "variable":
+            mapped["attribute_line_ids"] = VariantMapper.wc_attributes_to_odoo(product.get("attributes", []))
+        return mapped
 
     @staticmethod
     def odoo_to_wc(product: dict[str, Any]) -> dict[str, Any]:
@@ -40,7 +43,7 @@ class ProductMapper:
         elif isinstance(categ_id, int):
             wc_categories = [{"id": categ_id}]
 
-        return {
+        mapped = {
             "name": product.get("name"),
             "sku": product.get("default_code"),
             "regular_price": str(_to_float(product.get("list_price"))),
@@ -49,6 +52,89 @@ class ProductMapper:
             "manage_stock": True,
             "categories": wc_categories,
         }
+        variant_ids = product.get("product_variant_ids") or []
+        if len(variant_ids) > 1 or product.get("attribute_line_ids") or product.get("template_attribute_lines"):
+            mapped["type"] = "variable"
+            mapped["attributes"] = VariantMapper.odoo_attributes_to_wc(product)
+        return mapped
+
+
+class VariantMapper:
+    """Mapea variantes y atributos entre WooCommerce y Odoo."""
+
+    @staticmethod
+    def wc_attributes_to_odoo(wc_attributes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Convierte atributos WooCommerce a estructura utilizable por Odoo."""
+        mapped: list[dict[str, Any]] = []
+        for attribute in wc_attributes or []:
+            name = attribute.get("name")
+            if not name:
+                continue
+            options = [str(option) for option in (attribute.get("options") or []) if option not in (None, "")]
+            mapped.append(
+                {
+                    "attribute_name": name,
+                    "values": options,
+                    "visible": bool(attribute.get("visible", True)),
+                    "variation": bool(attribute.get("variation", True)),
+                }
+            )
+        return mapped
+
+    @staticmethod
+    def wc_variation_to_odoo(wc_variation: dict[str, Any]) -> dict[str, Any]:
+        """Convierte una variación WooCommerce a formato product.product."""
+        return {
+            "default_code": wc_variation.get("sku"),
+            "lst_price": _to_float(wc_variation.get("regular_price") or wc_variation.get("price")),
+            "qty_available": _to_float(wc_variation.get("stock_quantity")),
+            "x_wc_variation_id": wc_variation.get("id"),
+            "variant_attributes": [
+                {"name": item.get("name"), "value": item.get("option")}
+                for item in (wc_variation.get("attributes") or [])
+                if item.get("name") and item.get("option") not in (None, "")
+            ],
+        }
+
+    @staticmethod
+    def odoo_variant_to_wc_variation(odoo_variant: dict[str, Any]) -> dict[str, Any]:
+        """Convierte una variante Odoo a formato de variación WooCommerce."""
+        raw_attributes = odoo_variant.get("variant_attributes") or odoo_variant.get("variant_attribute_values") or []
+        attributes = []
+        for item in raw_attributes:
+            if item.get("name") and item.get("value") not in (None, ""):
+                attributes.append({"name": item["name"], "option": str(item["value"])})
+
+        return {
+            "sku": odoo_variant.get("default_code"),
+            "regular_price": str(_to_float(odoo_variant.get("lst_price"))),
+            "stock_quantity": int(_to_float(odoo_variant.get("qty_available"))),
+            "manage_stock": True,
+            "attributes": attributes,
+        }
+
+    @staticmethod
+    def odoo_attributes_to_wc(odoo_template: dict[str, Any]) -> list[dict[str, Any]]:
+        """Convierte atributos de plantilla Odoo a formato WooCommerce."""
+        lines = (
+            odoo_template.get("template_attribute_lines")
+            or odoo_template.get("attribute_line_ids_data")
+            or []
+        )
+        attributes: list[dict[str, Any]] = []
+        for line in lines:
+            name = line.get("attribute_name")
+            if not name:
+                attribute_id = line.get("attribute_id")
+                if isinstance(attribute_id, (list, tuple)) and len(attribute_id) > 1:
+                    name = str(attribute_id[1])
+                elif isinstance(attribute_id, str):
+                    name = attribute_id
+            if not name:
+                continue
+            options = [str(value) for value in (line.get("values") or []) if value not in (None, "")]
+            attributes.append({"name": name, "visible": True, "variation": True, "options": options})
+        return attributes
 
 
 class OrderMapper:
